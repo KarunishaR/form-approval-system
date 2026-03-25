@@ -1,4 +1,5 @@
 require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const connectDB = require('./config/db');
@@ -10,16 +11,24 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// Middleware
-app.use(cors({
+// ✅ CORS configuration (merged properly)
+const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
-}));
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// Middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// 1. CATEGORIES
+
+// ================= ROUTES =================
+
+// 1. Categories
 app.get('/api/categories', async (req, res) => {
   try {
     const categories = await Category.find({ isActive: true }).lean();
@@ -31,35 +40,41 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// 2. ROUTES
-// ⚠️ IMPORTANT: Register routers BEFORE any catch-all or 404 handler
-// The inline app.post('/api/staff/complete-profile') was REMOVED — 
-// it was conflicting with routes/staff.js which handles this properly.
+// 2. Other Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/forms', require('./routes/forms'));
 app.use('/api/staff', require('./routes/staff'));
 
-// Health check
+
+// ================= HEALTH CHECK =================
 app.get('/api/health', (req, res) => {
   res.json({ 
     success: true, 
     message: '✅ ALL ROUTES WORKING',
-    routes: ['/api/categories', '/api/forms/submit', '/api/staff/complete-profile']
+    routes: [
+      '/api/categories',
+      '/api/forms/submit',
+      '/api/staff/complete-profile'
+    ]
   });
 });
 
-// Error handling
+
+// ================= ERROR HANDLING =================
 app.use((err, req, res, next) => {
   console.error('❌ GLOBAL ERROR:', err.message);
   res.status(500).json({ success: false, message: 'Server error occurred' });
 });
 
-// 404
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
+
+// ================= SERVER =================
 const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
   console.log('\n🚀 SERVER STARTED!');
   console.log(`📍 http://localhost:${PORT}`);
