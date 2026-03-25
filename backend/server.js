@@ -8,14 +8,13 @@ const Category = require('./models/Category');
 
 const app = express();
 
-// Connect to MongoDB
+// 🔥 Connect to MongoDB
 connectDB();
 
-// ✅ CORS configuration (merged properly)
+// ✅ CORS configuration
 const corsOptions = {
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true,
-  optionsSuccessStatus: 200
 };
 
 app.use(cors(corsOptions));
@@ -26,14 +25,23 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
+// ================= DEBUG ROOT ROUTE =================
+app.get('/', (req, res) => {
+  console.log("🔥 Root route hit");
+  res.send('Backend is running 🚀');
+});
+
+
 // ================= ROUTES =================
 
 // 1. Categories
 app.get('/api/categories', async (req, res) => {
   try {
+    console.log("🔥 Categories route hit");
+
     const categories = await Category.find({ isActive: true }).lean();
-    console.log('✅ Categories:', categories.length);
     res.json({ success: true, data: categories });
+
   } catch (error) {
     console.error('❌ Categories error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -48,9 +56,11 @@ app.use('/api/staff', require('./routes/staff'));
 
 // ================= HEALTH CHECK =================
 app.get('/api/health', (req, res) => {
+  console.log("🔥 Health route hit");
+
   res.json({ 
     success: true, 
-    message: '✅ ALL ROUTES WORKING',
+    message: "Working",
     routes: [
       '/api/categories',
       '/api/forms/submit',
@@ -78,9 +88,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log('\n🚀 SERVER STARTED!');
   console.log(`📍 http://localhost:${PORT}`);
-  console.log('✅ AUTH:         /api/auth');
-  console.log('✅ FORMS:        /api/forms/submit');
-  console.log('✅ STAFF:        /api/staff/complete-profile');
-  console.log('✅ CATEGORIES:   /api/categories');
   console.log('===================\n');
 });
