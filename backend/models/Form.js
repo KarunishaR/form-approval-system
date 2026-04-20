@@ -14,59 +14,62 @@ const formSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
-    trim: true,
   },
   description: {
     type: String,
     required: true,
   },
   formData: {
-    type: Map,
-    of: String,
+    type: Object,
+    default: {},
   },
   attachments: [{
     filename: String,
     path: String,
-    uploadedAt: {
-      type: Date,
-      default: Date.now,
-    },
   }],
   status: {
     type: String,
     enum: ['pending', 'level1_approved', 'approved', 'rejected'],
     default: 'pending',
   },
-  approvals: [{
-    level: Number,
-    approverId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-    },
-    status: {
-      type: String,
-      enum: ['pending', 'approved', 'rejected'],
-    },
-    remarks: String,
-    actionDate: Date,
-  }],
   currentApprovalLevel: {
     type: Number,
     default: 1,
   },
+  approvals: [{
+    level: {
+      type: Number,
+      required: true,
+      enum: [1, 2],
+    },
+    approverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    remarks: {
+      type: String,
+      default: '',
+    },
+    actionDate: {
+      type: Date,
+    },
+  }],
   submittedAt: {
     type: Date,
     default: Date.now,
   },
   updatedAt: {
     type: Date,
-    default: Date.now,
+    default: Date.now,  // ✅ handled by default, no pre-save hook needed
   },
 });
 
-// Update the updatedAt timestamp before saving
-formSchema.pre('save', function () {
-  this.updatedAt = Date.now();
-});
+// ✅ No pre-save hook needed — removed
 
 module.exports = mongoose.model('Form', formSchema);

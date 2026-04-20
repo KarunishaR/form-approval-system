@@ -30,12 +30,12 @@ exports.completeProfile = async (req, res) => {
     user.approvalLevel = parseInt(approvalLevel);
     await user.save();
 
+    // Update category approvers
     const category = await Category.findById(categoryId);
-
+    
     if (category) {
-      // ✅ FIXED: null-safe check before calling .toString()
       category.approvers = category.approvers.filter(
-        a => a.staffId && a.staffId.toString() !== user._id.toString()
+        a => a.staffId.toString() !== user._id.toString()
       );
 
       category.approvers.push({
@@ -44,25 +44,13 @@ exports.completeProfile = async (req, res) => {
       });
 
       category.approvers.sort((a, b) => a.level - b.level);
-
       await category.save();
     }
 
     res.status(200).json({
       success: true,
       message: 'Profile completed successfully',
-      data: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        staffId: user.staffId,
-        designation: user.designation,
-        approvalLevel: user.approvalLevel,
-        categoryHead: user.categoryHead,
-        isEmailVerified: user.isEmailVerified,
-      },
+      data: user,
     });
   } catch (error) {
     console.error('Profile completion error:', error);
@@ -74,7 +62,7 @@ exports.completeProfile = async (req, res) => {
   }
 };
 
-// Get forms pending for approval by this staff member
+// Get forms pending for approval - FIXED VERSION
 exports.getPendingForms = async (req, res) => {
   try {
     const staff = await User.findById(req.user.id);
@@ -86,24 +74,30 @@ exports.getPendingForms = async (req, res) => {
       });
     }
 
-    let query = {
-      'approvals.approverId': req.user.id,
-      'approvals.status': 'pending',
-    };
+    console.log('Staff approval level:', staff.approvalLevel);
 
-    if (staff.approvalLevel === 2) {
-      query.status = 'level1_approved';
-      query.currentApprovalLevel = 2;
-    } else if (staff.approvalLevel === 1) {
+    // Get ALL pending forms based on approval level
+    let query = {};
+    
+    if (staff.approvalLevel === 1) {
+      // Level 1 sees all forms with status 'pending'
       query.status = 'pending';
       query.currentApprovalLevel = 1;
+    } else if (staff.approvalLevel === 2) {
+      // Level 2 sees all forms with status 'level1_approved'
+      query.status = 'level1_approved';
+      query.currentApprovalLevel = 2;
     }
+
+    console.log('Query:', query);
 
     const forms = await Form.find(query)
       .populate('studentId', 'name email studentId department')
       .populate('category', 'name icon')
-      .populate('approvals.approverId', 'name designation')
+      .populate('approvals.approverId', 'name designation approvalLevel')
       .sort({ submittedAt: -1 });
+
+    console.log('Found forms:', forms.length);
 
     res.status(200).json({
       success: true,
@@ -124,13 +118,16 @@ exports.getPendingForms = async (req, res) => {
 exports.getAllForms = async (req, res) => {
   try {
     const { status, category } = req.query;
+    
+    const query = {};
 
-    const query = {
-      'approvals.approverId': req.user.id,
-    };
+    if (status) {
+      query.status = status;
+    }
 
-    if (status) query.status = status;
-    if (category) query.category = category;
+    if (category) {
+      query.category = category;
+    }
 
     const forms = await Form.find(query)
       .populate('studentId', 'name email studentId department')
@@ -152,11 +149,13 @@ exports.getAllForms = async (req, res) => {
   }
 };
 
-// Approve or reject a form
+// Process form (approve/reject) - FIXED VERSION
 exports.processForm = async (req, res) => {
   try {
     const { formId } = req.params;
     const { action, remarks } = req.body;
+
+    console.log('Processing form:', formId, 'Action:', action);
 
     if (!['approve', 'reject'].includes(action)) {
       return res.status(400).json({
@@ -178,18 +177,10 @@ exports.processForm = async (req, res) => {
     }
 
     const staff = await User.findById(req.user.id);
+    
+    console.log('Staff level:', staff.approvalLevel, 'Form status:', form.status);
 
-    const approvalIndex = form.approvals.findIndex(
-      a => a.approverId._id.toString() === req.user.id && a.status === 'pending'
-    );
-
-    if (approvalIndex === -1) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are not authorized to process this form or it has already been processed',
-      });
-    }
-
+    // Check if correct approval level
     if (staff.approvalLevel === 2 && form.status !== 'level1_approved') {
       return res.status(400).json({
         success: false,
@@ -197,10 +188,38 @@ exports.processForm = async (req, res) => {
       });
     }
 
+    if (staff.approvalLevel === 1 && form.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'This form has already been processed',
+      });
+    }
+
+    // Find or create approval entry
+    let approvalIndex = form.approvals.findIndex(
+      a => a.level === staff.approvalLevel && a.status === 'pending'
+    );
+
+    console.log('Approval index:', approvalIndex);
+
+    // If no approval entry exists, create one
+    if (approvalIndex === -1) {
+      console.log('Creating new approval entry for level', staff.approvalLevel);
+      form.approvals.push({
+        level: staff.approvalLevel,
+        approverId: req.user.id,
+        status: 'pending',
+      });
+      approvalIndex = form.approvals.length - 1;
+    }
+
+    // Update the approval
     form.approvals[approvalIndex].status = action === 'approve' ? 'approved' : 'rejected';
     form.approvals[approvalIndex].remarks = remarks || '';
     form.approvals[approvalIndex].actionDate = new Date();
+    form.approvals[approvalIndex].approverId = req.user.id;
 
+    // Update form status
     if (action === 'reject') {
       form.status = 'rejected';
     } else if (staff.approvalLevel === 1) {
@@ -210,14 +229,16 @@ exports.processForm = async (req, res) => {
       form.status = 'approved';
     }
 
+    console.log('New form status:', form.status);
+
     await form.save();
 
-    // Send email notification to student
+    // Send email notification
     try {
       const studentEmail = form.studentId.email;
       const studentName = form.studentId.name;
-      const statusText = form.status === 'approved' ? 'Approved' :
-                         form.status === 'rejected' ? 'Rejected' :
+      const statusText = form.status === 'approved' ? 'Approved' : 
+                         form.status === 'rejected' ? 'Rejected' : 
                          'Partially Approved (Level 1)';
 
       let nextStepMessage = '';
@@ -238,11 +259,6 @@ exports.processForm = async (req, res) => {
             ${remarks ? `<p><strong>Remarks:</strong> ${remarks}</p>` : ''}
           </div>
           ${nextStepMessage}
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${process.env.FRONTEND_URL}/student/forms/${form._id}" style="background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-              View Form Details
-            </a>
-          </div>
         </div>
       `;
 
@@ -255,40 +271,38 @@ exports.processForm = async (req, res) => {
       console.error('Email sending failed:', emailError);
     }
 
-    // Notify Level 2 approver if Level 1 just approved
+    // Notify Level 2 if approved by Level 1
     if (form.status === 'level1_approved') {
-      const level2Approval = form.approvals.find(a => a.level === 2);
-      if (level2Approval) {
-        try {
-          const level2Approver = level2Approval.approverId;
+      try {
+        // Find a Level 2 staff member
+        const level2Staff = await User.findOne({ 
+          role: 'staff', 
+          approvalLevel: 2 
+        });
 
+        if (level2Staff) {
           const level2Html = `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
               <h2 style="color: #4F46E5;">Form Awaiting Your Approval (Level 2)</h2>
-              <p>Hello ${level2Approver.name},</p>
-              <p>A form has been approved by Level 1 and now requires your final approval:</p>
+              <p>Hello ${level2Staff.name},</p>
+              <p>A form has been approved by Level 1 and now requires your approval:</p>
               <div style="background-color: #F3F4F6; padding: 20px; border-radius: 5px; margin: 20px 0;">
                 <p><strong>Form Title:</strong> ${form.title}</p>
                 <p><strong>Category:</strong> ${form.category.name}</p>
                 <p><strong>Submitted by:</strong> ${form.studentId.name}</p>
-                <p><strong>Level 1 Approved by:</strong> ${staff.name} (${staff.designation})</p>
-              </div>
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${process.env.FRONTEND_URL}/staff/forms/${form._id}" style="background-color: #4F46E5; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                  Review Form
-                </a>
+                <p><strong>Level 1 Approved by:</strong> ${staff.name}</p>
               </div>
             </div>
           `;
 
           await sendEmail({
-            email: level2Approver.email,
+            email: level2Staff.email,
             subject: `Level 2 Approval Required - ${form.title}`,
             html: level2Html,
           });
-        } catch (emailError) {
-          console.error('Level 2 notification email failed:', emailError);
         }
+      } catch (emailError) {
+        console.error('Level 2 notification email failed:', emailError);
       }
     }
 
@@ -312,21 +326,16 @@ exports.getStaffStats = async (req, res) => {
   try {
     const staff = await User.findById(req.user.id);
 
-    const totalForms = await Form.countDocuments({
-      'approvals.approverId': req.user.id,
-    });
+    const totalForms = await Form.countDocuments({});
 
-    let pendingQuery = {
-      'approvals.approverId': req.user.id,
-      'approvals.status': 'pending',
-    };
-
-    if (staff.approvalLevel === 2) {
-      pendingQuery.status = 'level1_approved';
-      pendingQuery.currentApprovalLevel = 2;
-    } else {
+    let pendingQuery = {};
+    
+    if (staff.approvalLevel === 1) {
       pendingQuery.status = 'pending';
       pendingQuery.currentApprovalLevel = 1;
+    } else if (staff.approvalLevel === 2) {
+      pendingQuery.status = 'level1_approved';
+      pendingQuery.currentApprovalLevel = 2;
     }
 
     const pendingForms = await Form.countDocuments(pendingQuery);

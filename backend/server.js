@@ -11,13 +11,10 @@ const app = express();
 // 🔥 Connect to MongoDB
 connectDB();
 
-// ✅ CORS configuration
-const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true,
-};
-
-app.use(cors(corsOptions));
+// ✅ CORS FIX (ALLOW EVERYTHING - for development)
+app.use(cors({
+  origin: '*'
+}));
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
